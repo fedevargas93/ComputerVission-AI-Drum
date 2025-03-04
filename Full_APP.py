@@ -38,11 +38,11 @@ class AirDrumsApp(QMainWindow):
 
         # Adjusted drum positions to reflect drummer's perspective
         self.drum_positions = {
-            "hi_hat": (200, 200),  # Hi-hat moved to where crash was
+            "hi_hat": (200, 200),
             "snare": (400, 350),
             "tom": (600, 250),
-            "kick": (500, 500),  # Centered kick drum
-            "crash": (850, 200)   # Crash moved all the way to the right
+            "kick": (500, 500),
+            "crash": (850, 200)
         }
 
         # UI Layout
@@ -50,12 +50,20 @@ class AirDrumsApp(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout()
 
-        # Instructions Label
-        self.label_instructions = QLabel("🥁 Welcome to AirDrums! 🥁\n\n🔹 How to Use:\n1️⃣ Position your hands in front of the camera\n2️⃣ Hit virtual drums using hand gestures\n3️⃣ Sounds will play based on movement\n4️⃣ Click 'Start Playing' to begin!", self)
-        self.label_instructions.setAlignment(Qt.AlignCenter)
-        self.label_instructions.setStyleSheet("color: white; font-size: 16px; background-color: black;")
-        self.layout.addWidget(self.label_instructions)
+        # Welcome Label with Black Background
+        self.label_welcome = QLabel("🥁 Welcome to AirDrums! 🥁", self)
+        self.label_welcome.setAlignment(Qt.AlignCenter)
+        self.label_welcome.setStyleSheet("color: white; font-size: 20px; background-color: black;")
+        self.layout.addWidget(self.label_welcome)
 
+        # Background Image - Drum Set
+        drum_img_path = "drum_set.png"
+        if os.path.exists(drum_img_path):
+            self.drum_set_img = cv2.imread(drum_img_path)
+            self.drum_set_img = cv2.flip(self.drum_set_img, 1)  # Flip image horizontally to correct orientation
+        else:
+            self.drum_set_img = None
+        
         # Start Button
         self.start_button = QPushButton("▶ Start Playing", self)
         self.start_button.clicked.connect(self.start_application)
@@ -74,20 +82,13 @@ class AirDrumsApp(QMainWindow):
 
         # Camera Setup
         self.cap = cv2.VideoCapture(0)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Adjust camera width
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)  # Adjust camera height
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
 
-        # Load and flip the Drum Set Image to match drummer's perspective
-        self.drum_set_img = None
-        drum_img_path = "drum_set.png"
-        if os.path.exists(drum_img_path):
-            self.drum_set_img = cv2.imread(drum_img_path)
-            self.drum_set_img = cv2.flip(self.drum_set_img, 1)  # Flip the image horizontally to invert view
-
     def start_application(self):
-        self.label_instructions.hide()
+        self.label_welcome.hide()
         self.start_button.hide()
         self.exit_button.hide()
         self.timer.start(10)
@@ -106,10 +107,15 @@ class AirDrumsApp(QMainWindow):
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb_frame)
 
-        # Ensure drum set image matches the camera frame size
+        # Overlay flipped drum set image
         if self.drum_set_img is not None:
-            self.drum_set_img = cv2.resize(self.drum_set_img, (w, h))
-            frame = cv2.addWeighted(self.drum_set_img, 0.5, frame, 0.5, 0)
+            drum_set_resized = cv2.resize(self.drum_set_img, (w, h))
+            frame = cv2.addWeighted(drum_set_resized, 0.5, frame, 0.5, 0)
+
+        # Draw drum positions on screen
+        for drum, (x, y) in self.drum_positions.items():
+            cv2.circle(frame, (x, y), 40, (255, 0, 0), 2)
+            cv2.putText(frame, drum.upper(), (x - 30, y - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         keypoints = []
         if results.multi_hand_landmarks:
@@ -117,23 +123,18 @@ class AirDrumsApp(QMainWindow):
                 self.mp_draw.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
                 for lm in hand_landmarks.landmark:
                     keypoints.extend([lm.x, lm.y, lm.z])
-        
+
         if len(keypoints) == 63:
             keypoints = np.array(keypoints).reshape(1, -1)
             prediction = self.model.predict(keypoints)
             predicted_class = list(self.drum_sounds.keys())[np.argmax(prediction)]
-            
-            # Highlight the detected drum
+
+            # Highlight detected drum position
             if predicted_class in self.drum_positions:
                 drum_x, drum_y = self.drum_positions[predicted_class]
                 cv2.circle(frame, (drum_x, drum_y), 50, (0, 255, 0), -1)
                 self.drum_sounds[predicted_class].play()
 
-        # Overlay drum positions
-        for drum, (x, y) in self.drum_positions.items():
-            cv2.circle(frame, (x, y), 40, (255, 0, 0), 2)
-            cv2.putText(frame, drum.upper(), (x - 30, y - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
         # Convert OpenCV image to Qt format
         height, width, channel = frame.shape
         bytes_per_line = 3 * width
